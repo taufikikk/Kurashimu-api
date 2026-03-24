@@ -58,6 +58,7 @@ class Scene(db.Model):
             "level": self.level,
             "phase": self.phase,
             "tone": self.tone,
+            "tier": self.tier,
             "situation_tags": self.situation_tags or [],
             "node_count": len(self.data.get("nodes", [])) if self.data else 0,
             "choice_count": len([n for n in self.data.get("nodes", []) if n.get("type") == "choice"]) if self.data else 0,
@@ -99,12 +100,16 @@ class PlayerState(db.Model):
 # ── Access Control ──────────────────────────────────────────────
 
 def get_max_tier():
-    """Check request header for elevated access. Default tier 1."""
+    """Check request header for elevated access. Default tier 1.
+    Returns (max_tier, error_response). If key is provided but wrong, returns 401.
+    """
     key = request.headers.get("X-Access-Key", "")
     t2_key = os.environ.get("ACCESS_KEY_T2", "")
-    if t2_key and key == t2_key:
-        return 2
-    return 1
+    if key:
+        if t2_key and key == t2_key:
+            return 2, None
+        return None, (jsonify({"error": "Invalid access key"}), 401)
+    return 1, None
 
 
 # ── Scene Endpoints ─────────────────────────────────────────────
@@ -112,7 +117,9 @@ def get_max_tier():
 @app.route("/api/scenes", methods=["GET"])
 def list_scenes():
     """List all scenes with optional filters. Tier-gated."""
-    max_tier = get_max_tier()
+    max_tier, err = get_max_tier()
+    if err:
+        return err
     level = request.args.get("level")
     phase = request.args.get("phase", type=int)
     tag = request.args.get("tag")
@@ -136,7 +143,9 @@ def list_scenes():
 @app.route("/api/scenes/<scene_id>", methods=["GET"])
 def get_scene(scene_id):
     """Get full scene data by scene_id. Tier-gated."""
-    max_tier = get_max_tier()
+    max_tier, err = get_max_tier()
+    if err:
+        return err
     scene = Scene.query.filter_by(scene_id=scene_id).first()
     if not scene or scene.tier > max_tier:
         return jsonify({"error": "Scene not found"}), 404
